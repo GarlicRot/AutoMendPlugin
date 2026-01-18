@@ -1,0 +1,108 @@
+name: Build and Release AutoMend
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v4
+        with:
+          ref: main   # change to 'master' if that's your default
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Update plugin version in gradle.properties
+        run: |
+          git fetch --tags --force
+          latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) || echo "v0.0.0")
+          version=${latest_tag#v}
+          IFS='.' read -r major minor patch <<< "$version"
+          new_patch=$((patch + 1))
+          new_version="$major.$minor.$new_patch"
+
+          current_version=$(grep "^plugin_version" gradle.properties | cut -d= -f2 | tr -d ' ')
+          if [ "$current_version" = "$new_version" ]; then
+            echo "Version already set to $new_version, skipping commit."
+          else
+            echo "Updating version to $new_version"
+            sed -i "s/^plugin_version=.*/plugin_version=$new_version/" gradle.properties
+            git config --global user.name "GitHub Actions"
+            git config --global user.email "actions@github.com"
+            git add gradle.properties
+            git commit -m "Update plugin version to $new_version"
+            git push origin HEAD
+          fi
+
+          echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
+
+      - name: Setup JDK for Java 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Build AutoMendPlugin
+        run: ./gradlew build
+
+      - name: Rename artifact to fixed 1.21.4 jar
+        run: |
+          mkdir -p dist
+          mv build/libs/AutoMendPlugin-*.jar dist/AutoMendPlugin-1.21.4.jar
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutoMendPlugin-1.21.4
+          path: dist/AutoMendPlugin-1.21.4.jar
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AutoMendPlugin-1.21.4
+          path: AutoMendPlugin-1.21.4
+
+      - name: Get and increment tag
+        id: get_tag
+        run: |
+          git fetch --tags --force
+          latest_tag=$(git describe --tags $(git rev-list --tags --max-count=1) || echo "v0.0.0")
+          version=${latest_tag#v}
+          IFS='.' read -r major minor patch <<< "$version"
+          new_patch=$((patch + 1))
+          new_tag="v$major.$minor.$new_patch"
+          echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
+
+      - name: Push new tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git fetch --unshallow --tags || true
+          git tag ${{ env.NEW_TAG }}
+          git push https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }} ${{ env.NEW_TAG }}
+
+      - name: Create GitHub Release
+        uses: marvinpinto/action-automatic-releases@latest
+        with:
+          repo_token: "${{ secrets.GITHUB_TOKEN }}"
+          automatic_release_tag: "${{ env.NEW_TAG }}"
+          prerelease: false
+          files: |
+            AutoMendPlugin-1.21.4/AutoMendPlugin-1.21.4.jar
