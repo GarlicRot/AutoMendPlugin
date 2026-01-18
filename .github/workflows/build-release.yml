@@ -19,24 +19,44 @@ jobs:
 
       - name: Update plugin version in gradle.properties
         run: |
-          git fetch --tags --force
-          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || echo "v0.0.0")
-          version=${latest_tag#v}
-          IFS='.' read -r major minor patch <<< "$version"
-          new_patch=$((patch + 1))
-          new_version="$major.$minor.$new_patch"
+          git fetch --tags --force || true
 
-          current_version=$(grep "^plugin_version" gradle.properties | cut -d= -f2 | tr -d ' ')
+          # Determine latest tag, or start fresh at 1.0.0
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || echo "")
+
+          if [ -z "$latest_tag" ]; then
+            # First release: 1.0.0
+            major=1
+            minor=0
+            patch=0
+          else
+            version=${latest_tag#v}
+            IFS='.' read -r major minor patch <<< "$version"
+            patch=$((patch + 1))
+          fi
+
+          new_version="$major.$minor.$patch"
+
+          current_version=$(grep "^plugin_version" gradle.properties | cut -d= -f2 | tr -d '[:space:]')
+          echo "Current plugin_version=$current_version, new_version=$new_version"
+
           if [ "$current_version" = "$new_version" ]; then
             echo "Version already set to $new_version, skipping commit."
           else
             echo "Updating version to $new_version"
-            sed -i "s/^plugin_version=.*/plugin_version=$new_version/" gradle.properties
-            git config --global user.name "GitHub Actions"
-            git config --global user.email "actions@github.com"
-            git add gradle.properties
-            git commit -m "Update plugin version to $new_version"
-            git push origin HEAD
+            # Handle both "plugin_version=..." and "plugin_version = ..."
+            sed -i "s/^plugin_version.*/plugin_version = $new_version/" gradle.properties
+
+            # Only commit if gradle.properties actually changed
+            if ! git diff --quiet gradle.properties; then
+              git config --global user.name "GitHub Actions"
+              git config --global user.email "actions@github.com"
+              git add gradle.properties
+              git commit -m "Update plugin version to $new_version"
+              git push origin HEAD
+            else
+              echo "No changes detected in gradle.properties after sed, skipping commit."
+            fi
           fi
 
           echo "NEW_VERSION=$new_version" >> $GITHUB_ENV
@@ -83,12 +103,22 @@ jobs:
       - name: Get and increment tag
         id: get_tag
         run: |
-          git fetch --tags --force
-          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || echo "v0.0.0")
-          version=${latest_tag#v}
-          IFS='.' read -r major minor patch <<< "$version"
-          new_patch=$((patch + 1))
-          new_tag="v$major.$minor.$new_patch"
+          git fetch --tags --force || true
+
+          latest_tag=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || echo "")
+
+          if [ -z "$latest_tag" ]; then
+            # First release tag: v1.0.0
+            major=1
+            minor=0
+            patch=0
+          else
+            version=${latest_tag#v}
+            IFS='.' read -r major minor patch <<< "$version"
+            patch=$((patch + 1))
+          fi
+
+          new_tag="v$major.$minor.$patch"
           echo "NEW_TAG=$new_tag" >> $GITHUB_ENV
 
       - name: Push new tag
@@ -98,6 +128,7 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           git fetch --unshallow --tags || true
+
           git tag "${{ env.NEW_TAG }}"
           git push "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}" "${{ env.NEW_TAG }}"
 
