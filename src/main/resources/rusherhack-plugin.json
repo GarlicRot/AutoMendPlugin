@@ -1,12 +1,17 @@
 {
-  "Plugin-Class": "org.example.ExamplePlugin",
+  "Plugin-Class": "com.garlicrot.automend.AutoMendPlugin",
+
   "Name": "${project.plugin_name}",
   "Version": "${project.plugin_version}",
-  "Description": "Example rusherhack plugin",
-  "URL": "https://github.com/RusherDevelopment/example-plugin",
+
+  "Description": "Automatically cycles damaged Mending items through offhand for easy repairing at XP farms.",
+
+  "URL": "https://github.com/GarlicRot/AutoMendPlugin",
+
   "Authors": [
-    "John200410"
+    "GarlicRot"
   ],
+
   "Minecraft-Versions": [
     "${project.minecraft_version}"
   ]
